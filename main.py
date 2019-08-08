@@ -7,8 +7,12 @@ import torch.backends.cudnn as cudnn
 
 import torchvision
 import torchvision.transforms as transforms
+import json
 
-import os
+import numpy as np
+import random
+
+import os, sys
 import argparse
 
 from models import *
@@ -18,7 +22,15 @@ from utils import progress_bar
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
+parser.add_argument('--output_dir', type=str, help="folder to save the results")
+parser.add_argument('--seed', type=int, help="random seed for the run")
 args = parser.parse_args()
+
+"""Initialize random seeds."""
+torch.manual_seed(args.seed)
+torch.cuda.manual_seed(args.seed)
+np.random.seed(args.seed)
+random.seed(args.seed)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
@@ -60,7 +72,8 @@ print('==> Building model..')
 # net = ShuffleNetG2()
 # net = SENet18()
 # net = ShuffleNetV2(1)
-net = EfficientNetB0()
+# net = EfficientNetB0()
+net = ResNet50()
 net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
@@ -77,6 +90,11 @@ if args.resume:
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+
+train_acc_list = []
+train_loss_list = []
+test_acc_list = []
+
 
 # Training
 def train(epoch):
@@ -100,6 +118,8 @@ def train(epoch):
 
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+    train_acc_list.append(100.*correct/total)
+    train_loss_list.append(train_loss/(batch_idx+1))
 
 def test(epoch):
     global best_acc
@@ -120,6 +140,7 @@ def test(epoch):
 
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                 % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+        test_acc_list.append(100.*correct/total)
 
     # Save checkpoint.
     acc = 100.*correct/total
@@ -137,5 +158,14 @@ def test(epoch):
 
 
 for epoch in range(start_epoch, start_epoch+200):
+    if epoch == 80 or epoch == 160:
+        for group in optimizer.param_groups:
+            group['lr'] /= 10.0
     train(epoch)
     test(epoch)
+
+# save to the result_file
+with open(args.output_dir + "/results.json", "w") as f:
+    json.dump({"train_loss": train_loss_list, 
+        "train_acc": train_acc_list,
+        "test_acc": test_acc_list}, f)
